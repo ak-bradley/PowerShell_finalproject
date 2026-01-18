@@ -1,0 +1,44 @@
+Setup case: The VPN client on my host machine was initially configured to block all connections to local network devices. This configuration was intended to enforce network 
+isolation, preventing local subnet traffic leakage, including traffic to VM IP ranges.
+I set it up that way deliberately, but I didn’t actively store this information in my mind and didn’t take into consideration the VPN firewall in my VM connection prep. 
+This operational mistake resulted self-inflicted errors in WinRM checkup. Since WinRM relies on TCP traffic over the local network (HTTP/port 5985), the VPN’s firewall 
+effectively blocked my attempts at establishing a remote session.
+The connection failures resulted in various Test-WSMan and Invoke-Command errors, including validation issues and timeouts, not misconfiguration of WinRM itself, which 
+I couldn’t understand in the first couple of tries.
+I split-tunneled the VM in the VPN firewall and all WinRM functionality resumed back to normal. The lengthy process of retrieving access isn’t relevant so I’m going to 
+disregard the back and forth attempts to try to establish connection between the host and the VM and move straight to the setup after the changes in VPN. 
+The host-VM connection process follows three logical steps.
+
+I. VM CONFIG (VM OS: Windows Server 2022 DataBase Evaluation)
+1. enable-psremoting -force
+2. get-netconnection profile
+This determines if the connection profile is set to public or private. If “public” custom firewall settings can be stricter blocking the VM connection. Explanation: 
+Powershell remoting listens ports 5985 (HTTP) and 5986 (HTTPS), which can be blocked for public connection but unlocked for private ones.
+b) if public change to private via cmd: set-netconnectionprofile -networkcategory private
+3. Get VM IP address to use for configuration on the host ipconfig and look for the IPv4 output:
+IPv4 Address. . . . . . . . . . . : xxx.xx.x.xxx
+Side note: ipconfig shows active interfaces compared to get-netipaddress that shows whole lot of inactive and irrelevant interfaces (like loopback) which is ineffective.
+
+II. HOST MACHINE CONFIG (Host OS: Windows 11 Pro)
+1. test-wsman -computername xxx.xx.x.xxx
+The cmd returning results means that WinRM is running and responding (Windows Remote Management is a ssh-like protocol for remote communication on Windows machines)
+III. CONTENT CREATION: HOST → VM
+1. $cred = get-credential
+This authenticates the connection with the VM. PowerShell returns a prompt where correct details have to be entered in this specific format: xxx.xx.x.xxx\Administrator 
+(not xxx.xx.x.xxx/Administrator!) with the same password that’s been used in the VM setup. 
+2.  invoke-command -computername xxx.xx.x.xxx -credential $cred -scriptblock {
+$path = "c:\users\administrator\desktop\remote_test.txt"
+    "This file was created remotely from host: Windows 11 to Windows Server VM." | out-file -filepath $path}
+
+invoke-command: allow for remote command control
+-computername xxx.xx.x.xxx- connects to remote machine via IP address
+-credential $cred- authenticates with the remote machine using stored credential
+-scriptblock {} -runs a series of commands on a remote machine i.e. creates specific file with a specific content on a 
+specific path
+
+
+After the setup and successfully performed file creation one can disconnect from the VM through
+
+invoke-command -computername xxx.xx.x.xxx -credential $cred -scriptblock {stop-computer -force} 
+or alternatively: stop-vm -name "windowsserver" -force 
+
